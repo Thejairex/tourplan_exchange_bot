@@ -2,11 +2,13 @@ FROM mcr.microsoft.com/playwright/python:v1.46.0-jammy
 
 WORKDIR /app
 
+ENV TZ=America/Argentina/Buenos_Aires
+ENV DEBIAN_FRONTEND=noninteractive
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends cron tzdata \
+    && ln -fs /usr/share/zoneinfo/$TZ /etc/localtime \
     && rm -rf /var/lib/apt/lists/*
-
-ENV TZ=America/Argentina/Buenos_Aires
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
