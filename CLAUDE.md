@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Qué es
 
-Bot que corre una vez por día (cron, 9am) para cargar 3 tipos de cambio en
+Bot que corre una vez por día (cron, 8am) para cargar 3 tipos de cambio en
 Tourplan NX: Dólar MEP, Dólar Oficial y Dólar Emisivo. Scrapea las
 cotizaciones, valida que sean razonables, y las carga automatizando el
 navegador con Playwright. Si algo falla, corta y avisa por email.

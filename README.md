@@ -74,7 +74,7 @@ python main.py
 Revisá la salida y `logs/tourplan_fx_bot.log`. Si algo falla, el mensaje de
 error indica en qué paso fue.
 
-## Programarlo a las 9am (cron)
+## Programarlo a las 8am (cron)
 
 ```bash
 crontab -e
@@ -83,10 +83,10 @@ crontab -e
 Agregar la línea (ajustando la ruta si copiaste el proyecto a otro lugar):
 
 ```
-0 9 * * * cd /opt/tourplan_fx_bot && /opt/tourplan_fx_bot/venv/bin/python main.py >> /opt/tourplan_fx_bot/logs/cron.log 2>&1
+0 8 * * * cd /opt/tourplan_fx_bot && /opt/tourplan_fx_bot/venv/bin/python main.py >> /opt/tourplan_fx_bot/logs/cron.log 2>&1
 ```
 
-Esto corre el bot todos los días a las 9:00 (hora del servidor — confirmar
+Esto corre el bot todos los días a las 8:00 (hora del servidor — confirmar
 que el servidor esté en horario de Argentina, o ajustar la hora del cron
 según corresponda: `TZ=America/Argentina/Buenos_Aires` se puede definir al
 inicio del crontab si el servidor está en otro huso horario).
@@ -113,7 +113,7 @@ docker compose exec tourplan-fx-bot python main.py
 ```
 
 El contenedor queda corriendo con un cron interno que ejecuta `main.py`
-todos los días a las 9:00 hora de Argentina (`TZ=America/Argentina/Buenos_Aires`
+todos los días a las 8:00 hora de Argentina (`TZ=America/Argentina/Buenos_Aires`
 fijo en el `Dockerfile`) y manda la salida a `docker compose logs`.
 `HEADLESS=true` queda forzado vía `docker-compose.yml` porque el contenedor
 no tiene pantalla — para debuguear con navegador visible, seguí usando la

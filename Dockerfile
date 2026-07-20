@@ -15,7 +15,7 @@ COPY . .
 
 # El cron corre a las 9am hora local (TZ definida arriba) y manda stdout/stderr
 # al log de Docker (docker compose logs).
-RUN echo "0 9 * * * root cd /app && /usr/local/bin/python /app/main.py >> /proc/1/fd/1 2>> /proc/1/fd/2" \
+RUN echo "0 8 * * * root cd /app && /usr/local/bin/python /app/main.py >> /proc/1/fd/1 2>> /proc/1/fd/2" \
     > /etc/cron.d/tourplan-fx-bot \
     && chmod 0644 /etc/cron.d/tourplan-fx-bot \
     && crontab /etc/cron.d/tourplan-fx-bot
