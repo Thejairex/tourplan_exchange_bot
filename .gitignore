@@ -1,0 +1,13 @@
+# Credenciales y secretos
+.env
+data/tourplan_session.json   # cookies de sesión de Tourplan (equivalen a estar logueado)
+
+# Datos y salidas generadas en runtime
+data/historial_cotizaciones.json
+logs/
+
+# Entorno e intermedios de Python
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/

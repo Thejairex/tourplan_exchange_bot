@@ -1,0 +1,158 @@
+"""
+scrapers.py
+-----------
+Extrae las cotizaciones necesarias y calcula los 3 valores a cargar en Tourplan:
+
+    Dolar Oficial  = Valor Venta del "Dólar Oficial" en dolarhoy.com
+    Dolar Emisivo  = Dolar Oficial + 10 ARS
+    Dolar MEP      = Valor Venta del "Dólar MEP" en dolarhoy.com
+
+La página fuente es HTML de servidor (no requiere JavaScript), por lo que
+alcanza con requests + BeautifulSoup. No hace falta un navegador headless
+para esta parte.
+
+`_fetch` reintenta con backoff antes de darse por vencido, por si el sitio
+tarda o corta la conexión en algún request puntual.
+
+Estrategia de parseo: en vez de depender de nombres de clases CSS (que un
+rediseño del sitio puede cambiar de un día para otro), se busca sobre el
+TEXTO VISIBLE de la página los rótulos "Compra"/"Venta" cerca del nombre de
+cada cotización. Es más robusto ante cambios de maquetación.
+"""
+from __future__ import annotations
+
+import logging
+import re
+import time
+from dataclasses import dataclass
+
+import requests
+from bs4 import BeautifulSoup
+
+logger = logging.getLogger("tourplan_fx_bot.scrapers")
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    )
+}
+
+DOLARHOY_URL = "https://dolarhoy.com/"
+
+REQUEST_TIMEOUT = 20
+
+
+class ScrapingError(RuntimeError):
+    """Se lanza cuando no se puede extraer un valor esperado de una página."""
+
+
+@dataclass
+class Cotizaciones:
+    dolar_mep: float
+    dolar_oficial: float
+    dolar_emisivo: float
+
+
+def _parse_ar_number(raw: str) -> float:
+    """Convierte números en formato argentino o con punto decimal a float.
+
+    Ejemplos:
+        "1.527,80" -> 1527.80   (formato argentino, coma decimal)
+        "1527,80"  -> 1527.80
+        "1492.0000" -> 1492.0   (algunas tablas del BNA usan punto decimal)
+    """
+    raw = raw.strip()
+    if "," in raw:
+        raw = raw.replace(".", "").replace(",", ".")
+    return float(raw)
+
+
+REINTENTOS = 3
+ESPERA_ENTRE_REINTENTOS_SEG = 3.0
+
+
+def _fetch(url: str) -> str:
+    """Pide la URL con reintentos (ver nota sobre bna.com.ar en el docstring
+    del módulo: se recuperó sola en pruebas manuales a los pocos segundos)."""
+    ultimo_error: Exception | None = None
+    for intento in range(1, REINTENTOS + 1):
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+            resp.raise_for_status()
+            return resp.text
+        except requests.exceptions.RequestException as exc:
+            ultimo_error = exc
+            logger.warning(
+                "Intento %d/%d fallido pidiendo %s: %s", intento, REINTENTOS, url, exc
+            )
+            if intento < REINTENTOS:
+                time.sleep(ESPERA_ENTRE_REINTENTOS_SEG)
+
+    raise ScrapingError(
+        f"No se pudo obtener {url} tras {REINTENTOS} intentos: {ultimo_error}"
+    ) from ultimo_error
+
+
+def get_dolar_mep(html: str | None = None) -> float:
+    """Extrae el valor VENTA del recuadro "Dólar MEP" de dolarhoy.com."""
+    html = html if html is not None else _fetch(DOLARHOY_URL)
+    soup = BeautifulSoup(html, "html.parser")
+    text = re.sub(r"\s+", " ", soup.get_text(separator=" | "))
+
+    # Número con o sin decimales: dolarhoy.com muestra algunas cotizaciones
+    # con coma decimal ("1.531,60") y otras como entero ("1450"). El bloque
+    # Compra+Venta se busca anclado al principio de la ventana (re.match, no
+    # re.search) para que, si el par inmediato no matchea, NO se salte al
+    # bloque de la SIGUIENTE cotización que sí tenga el formato esperado.
+    number = r"[\d\.]+(?:,\d{2})?"
+    par = rf"\D{{0,15}}?Compra\D{{0,20}}?{number}\D{{0,20}}?Venta\D{{0,15}}?({number})"
+    for m in re.finditer(r"D[oó]lar\s*MEP", text, re.IGNORECASE):
+        window = text[m.end(): m.end() + 300]
+        # Evita confundir con "Dólar MEP Cripto" u otras variantes largas
+        venta_m = re.match(par, window)
+        if venta_m:
+            return _parse_ar_number(venta_m.group(1))
+
+    raise ScrapingError(
+        "No se pudo encontrar el valor Venta de 'Dólar MEP' en dolarhoy.com. "
+        "Es probable que el sitio haya cambiado de formato; revisar manualmente."
+    )
+
+
+def get_dolar_oficial(html: str | None = None) -> float:
+    """Extrae el valor VENTA del recuadro "Dólar Oficial" de dolarhoy.com."""
+    html = html if html is not None else _fetch(DOLARHOY_URL)
+    soup = BeautifulSoup(html, "html.parser")
+    text = re.sub(r"\s+", " ", soup.get_text(separator=" | "))
+
+    number = r"[\d\.]+(?:,\d{2})?"
+    par = rf"\D{{0,15}}?Compra\D{{0,20}}?{number}\D{{0,20}}?Venta\D{{0,15}}?({number})"
+    for m in re.finditer(r"D[oó]lar\s*Oficial", text, re.IGNORECASE):
+        window = text[m.end(): m.end() + 300]
+        venta_m = re.match(par, window)
+        if venta_m:
+            return _parse_ar_number(venta_m.group(1))
+
+    raise ScrapingError(
+        "No se pudo encontrar el valor Venta de 'Dólar Oficial' en dolarhoy.com. "
+        "Es probable que el sitio haya cambiado de formato; revisar manualmente."
+    )
+
+
+def obtener_cotizaciones() -> Cotizaciones:
+    """Punto de entrada principal: devuelve los 3 valores listos para cargar."""
+    mep = get_dolar_mep()
+    oficial = get_dolar_oficial()
+    emisivo = round(oficial + 10, 2)
+
+    logger.info(
+        "Cotizaciones obtenidas -> MEP: %s | Oficial: %s | Emisivo: %s",
+        mep, oficial, emisivo,
+    )
+    return Cotizaciones(dolar_mep=mep, dolar_oficial=oficial, dolar_emisivo=emisivo)
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    print(obtener_cotizaciones())

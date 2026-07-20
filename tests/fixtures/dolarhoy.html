@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<!--
+Recorte simplificado de la estructura real de dolarhoy.com (relevada con
+Chrome DevTools el 2026-07-10). Reproduce dos patrones que aparecen en la
+página real para el mismo "Dólar MEP":
+
+1. Un link de patrocinio en la navbar/sidebar que contiene el texto
+   "Dólar MEP" pero SIN "Compra"/"Venta" cerca -> el parser debe ignorarlo.
+2. La tarjeta real de cotización (class="values"), con "Compra"/"Venta"
+   como labels seguidos del valor -> es la que el parser debe encontrar.
+3. Una fila de la tabla resumen "COTIZACIONES" al final de la página, que
+   repite "Dólar MEP" pero sin los labels "Compra"/"Venta" en el mismo
+   bloque (aparecen una sola vez en el encabezado de la tabla) -> tampoco
+   debe confundir al parser, que ya matcheó en el punto 2.
+
+Se agregó además el mismo patrón para "Dólar Oficial" (link de navegación
+sin Compra/Venta cerca + tarjeta real de cotización), verificado contra la
+página real el 2026-07-20.
+-->
+<html lang="es">
+<body>
+  <div class="navbar__sub_links">
+    <a class="navbar__sub_link" href="/subseccion/dolar-mep">Dólar MEP</a>
+  </div>
+
+  <div class="tile is-child" style="border-top:2px solid #1e27f3">
+    <div class="title">
+      <a class="titleText" href="https://bullmarket.com.ar/">Dólar MEP </a>
+    </div>
+    <div class="values">
+      <div class="compra">
+        <div class="label">Compra</div>
+        <div class="val" style="color:#1e27f3">$1525,20</div>
+      </div>
+      <div class="separator" style="background:#1e27f3"></div>
+      <div class="venta">
+        <div class="venta-wrapper">
+          <div class="label">Venta</div>
+          <div class="val" style="color:#1e27f3">$1531,60</div>
+        </div>
+        <div class="var-porcentaje">0.00%</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="navbar__sub_links">
+    <a class="navbar__sub_link" href="/cotizaciondolaroficial">Dólar Oficial</a>
+  </div>
+
+  <div class="tile is-child" style="border-top:2px solid #2ecc71">
+    <div class="title">
+      <div class="titleText">Dólar Oficial</div>
+    </div>
+    <div class="values">
+      <div class="compra">
+        <div class="label">Compra</div>
+        <div class="val" style="color:#2ecc71">$1450,00</div>
+      </div>
+      <div class="separator" style="background:#2ecc71"></div>
+      <div class="venta">
+        <div class="venta-wrapper">
+          <div class="label">Venta</div>
+          <div class="val" style="color:#2ecc71">$1500,00</div>
+        </div>
+        <div class="var-porcentaje">0.00%</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tile is-parent">
+    <div class="tile is-child">
+      <div class="title first">Moneda</div>
+      <div class="compra first">Compra</div>
+      <div class="venta first">Venta</div>
+    </div>
+    <div class="tile is-child">
+      <a href="/cotizaciondolarbolsa">
+        <div class="title">Dólar MEP</div>
+        <div class="compra">1525,20</div>
+        <div class="venta">1531,60</div>
+      </a>
+    </div>
+    <div class="tile is-child">
+      <a href="/cotizaciondolaroficial">
+        <div class="title">Dólar Oficial</div>
+        <div class="compra">1450,00</div>
+        <div class="venta">1500,00</div>
+      </a>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,12 @@
+services:
+  tourplan-fx-bot:
+    build: .
+    container_name: tourplan-fx-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - HEADLESS=true
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
