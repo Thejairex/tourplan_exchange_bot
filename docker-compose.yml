@@ -10,3 +10,12 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+      # cron (dentro del contenedor) no hereda las variables que env_file
+      # inyecta al proceso principal (cron -f) - cada job que cron lanza
+      # arranca con un entorno propio y mínimo, sin TOURPLAN_URL/USER/
+      # PASSWORD ni el resto. Montar el .env como archivo real hace que
+      # `load_dotenv(BASE_DIR / ".env")` en main.py lo cargue sin depender
+      # del entorno que cron le dé al proceso - y de paso, editar el .env
+      # del host queda activo en la corrida siguiente sin recrear el
+      # contenedor.
+      - ./.env:/app/.env:ro
