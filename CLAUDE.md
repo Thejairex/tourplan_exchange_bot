@@ -47,11 +47,14 @@ ante cualquier fallo, envía un email de alerta y retorna código de salida `1`
 **antes** de dejar Tourplan a medio actualizar. El orden importa: la
 validación corre siempre antes de tocar Tourplan.
 
-1. **[scrapers.py](scrapers.py)** → `obtener_cotizaciones()` devuelve el
-   dataclass `Cotizaciones`. Usa `requests` + BeautifulSoup (la fuente es
-   HTML de servidor, no requiere navegador). Extrae Dólar MEP y Dólar
-   Oficial de dolarhoy.com; calcula `emisivo = oficial + 10`.
-   Excepción: `ScrapingError`.
+1. **[scrapers.py](scrapers.py)** → `obtener_cotizaciones()` devuelve
+   `ResultadoScraping` (dataclass que envuelve `Cotizaciones` +
+   `fuentes_fallback: list[str]`). Usa `requests` + BeautifulSoup (la fuente
+   es HTML de servidor, no requiere navegador). Extrae Dólar MEP y Dólar
+   Oficial de dolarhoy.com; calcula `emisivo = oficial + 10`. Si dolarhoy.com
+   no se puede parsear, cae automáticamente a dolarapi.com como respaldo
+   (`_obtener_con_fallback`) y lo señaliza en `fuentes_fallback` sin cortar
+   la carga; si las dos fuentes fallan, recién ahí lanza `ScrapingError`.
 2. **[validacion.py](validacion.py)** → `validar_y_registrar()` compara cada
    valor contra el último cargado en `data/historial_cotizaciones.json`; si la
    variación supera `UMBRAL_VARIACION_PCT` (15% por defecto) lanza
@@ -63,6 +66,10 @@ validación corre siempre antes de tocar Tourplan.
    cualquier fallo.
 4. **[alertas.py](alertas.py)** → `enviar_alerta()` manda email vía SMTP. Si
    falta config SMTP, loguea un warning y no falla (nunca rompe el proceso).
+
+Si los 4 pasos terminan OK, `main()` pinguea `HEARTBEAT_URL` con
+**[heartbeat.py](heartbeat.py)** → `enviar_heartbeat()` (dead-man's-switch
+externo, ej. healthchecks.io; ver "Puntos delicados" para el porqué).
 
 Toda la configuración entra por variables de entorno (`.env`), leídas solo en
 `main._config_desde_env()`. Los módulos reciben todo por parámetros — no leen
@@ -156,6 +163,19 @@ screenshot).
     rápida de re-verificar es `playwright codegen <URL>` grabando el flujo a
     mano una vez; el navegador también guarda un screenshot en `logs/` ante
     cualquier timeout.
+  - **`force=True` salta TODO el auto-wait de actionability, no solo el de
+    "recibe eventos"** (detectado el 2026-09-28, en una corrida real disparada
+    a mano): `_click_item_menu` necesita `force=True` porque un
+    `<div class="click-area">` superpuesto intercepta el click normal, pero
+    eso también salta la espera de "visible" - si el sidebar todavía está en
+    plena animación de apertura (típicamente justo después de un LOGIN
+    FRESCO, cuando no hay sesión guardada para reutilizar y por lo tanto no
+    hubo tiempo de que la página se "asiente"), el click fallaba al toque con
+    "Element is not visible" en vez de esperar a que termine la animación.
+    Con sesión reutilizada (el caso normal en producción) casi nunca se nota,
+    porque la página ya está asentada. Fix: esperar visibilidad
+    explícitamente (`item.wait_for(state="visible")`) ANTES del click
+    forzado, en vez de confiar en que `force=True` también espere.
 - **Scraping robusto a rediseños**: los scrapers parsean sobre el *texto
   visible* (rótulos "Compra"/"Venta", nombre de la cotización) con regex, en
   vez de depender de clases CSS. Al modificarlos, mantener esa estrategia y el
@@ -177,6 +197,40 @@ screenshot).
     vez de `1550`. Ahora distingue por cantidad de dígitos después del
     punto: exactamente 3 dígitos = separador de miles (se elimina), otra
     cantidad = punto decimal real (se deja).
+- **Fallback a dolarapi.com (agregado 2026-09-28, tras el segundo incidente
+  real de scraping roto en un mes)**: `_fallback_dolarapi()` en
+  [scrapers.py](scrapers.py) pega a `https://dolarapi.com/v1/dolares/{casa}`
+  (`casa="oficial"` para Oficial, `casa="bolsa"` como equivalente de MEP) —
+  JSON simple con `compra`/`venta` numéricos, sin HTML que un rediseño pueda
+  romper. Un solo intento, sin los reintentos de `_fetch()`. A propósito
+  **no se agregó el flag de "se usó fallback" al dataclass `Cotizaciones`**:
+  ese dataclass se persiste tal cual (`asdict`) en
+  `data/historial_cotizaciones.json` y entra en la comparación campo por
+  campo de `validar_y_registrar()` — un campo extra ahí se colaría en esa
+  comparación. En su lugar, `obtener_cotizaciones()` devuelve
+  `ResultadoScraping` (envuelve `Cotizaciones` + `fuentes_fallback`), y
+  `main.py` manda un aviso informativo y no bloqueante (reusando `_alertar`)
+  cuando `fuentes_fallback` no está vacío — la carga sigue con el valor de
+  respaldo, pero alguien tiene que enterarse para arreglar el parser de
+  dolarhoy.com, o un fallback silencioso lo esconde para siempre. `bolsa` de
+  dolarapi.com no es idéntico en metodología a "MEP" de dolarhoy.com (fuentes
+  distintas); se acepta la pequeña diferencia porque `validacion.py` sigue
+  validando el valor de fallback igual que cualquier otro.
+- **Heartbeat externo, independiente del mail (agregado 2026-09-28)**:
+  [heartbeat.py](heartbeat.py) → `enviar_heartbeat()` pinguea `HEARTBEAT_URL`
+  (ej. healthchecks.io) SOLO en el camino 100% exitoso de `main()`, al final
+  de todo. Existe porque el mail de `alertas.py` depende de la misma
+  configuración (`.env`) que el resto del bot — el incidente del 31/08/2026
+  (cron en Docker sin las variables de entorno) dejó al bot fallando en
+  silencio ~40 días porque ni siquiera podía mandar el mail de alerta (el
+  SMTP vivía en el mismo `.env` ausente). Un heartbeat es un canal aparte:
+  si el bot no llega a pingear un día, el servicio externo nota la ausencia
+  y avisa por su cuenta, sin depender de la salud del bot. Por eso NO se
+  envuelve en try/except en `main.py` — `enviar_heartbeat()` ya absorbe
+  cualquier error de red internamente y nunca lanza. No se pinguea en
+  ningún camino de error (`ScrapingError`/`ValidacionError`/
+  `TourplanAutomationError`): es justo esa ausencia la que el dead-man's-switch
+  debe detectar.
 - **Dólar Oficial pasó de scrapear el BNA a dolarhoy.com**: bna.com.ar era
   intermitente (bloqueaba con WAF, o cerraba la conexión sin responder y se
   recuperaba sola a los pocos segundos, sin un patrón claro de causa). Se

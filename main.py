@@ -4,13 +4,17 @@ main.py
 Orquestador diario. Este es el script que se programa en cron a las 9am.
 
 Flujo:
-    1. Scrapea Dólar MEP y Dólar Oficial (ambos de dolarhoy.com).
+    1. Scrapea Dólar MEP y Dólar Oficial (ambos de dolarhoy.com; si
+       dolarhoy.com no se puede parsear, cae a dolarapi.com como respaldo
+       automático y avisa por mail sin cortar la carga - ver scrapers.py).
     2. Calcula Dólar Emisivo = Oficial + 10.
     3. Valida que los valores no se desvíen demasiado del día anterior.
     4. Carga los 3 tipos de cambio en Tourplan NX vía Playwright.
     5. Loguea todo en logs/tourplan_fx_bot.log (con rotación diaria).
     6. Si algo falla en cualquier paso, envía un email de alerta y corta
        ANTES de dejar Tourplan en un estado a medio actualizar.
+    7. Si todo salió bien, pinguea HEARTBEAT_URL (heartbeat.py) - un canal
+       de aviso externo que no depende de que el propio bot pueda alertar.
 
 Configuración: ver .env.example (copiar a .env y completar).
 """
@@ -26,6 +30,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from alertas import enviar_alerta
+from heartbeat import enviar_heartbeat
 from scrapers import ScrapingError, obtener_cotizaciones
 from tourplan_automation import TourplanAutomationError, cargar_tipos_de_cambio
 from validacion import ValidacionError, validar_y_registrar
@@ -67,6 +72,7 @@ def _config_desde_env() -> dict:
         "smtp_user": os.environ.get("SMTP_USER", ""),
         "smtp_password": os.environ.get("SMTP_PASSWORD", ""),
         "alerta_email_to": os.environ.get("ALERTA_EMAIL_TO", ""),
+        "heartbeat_url": os.environ.get("HEARTBEAT_URL", ""),
     }
     faltantes = [k for k in ("tourplan_url", "tourplan_user", "tourplan_password") if not cfg[k]]
     if faltantes:
@@ -102,7 +108,7 @@ def main() -> int:
         return 1
 
     try:
-        cot = obtener_cotizaciones()
+        resultado = obtener_cotizaciones()
     except ScrapingError as exc:
         _alertar(
             cfg,
@@ -111,6 +117,24 @@ def main() -> int:
             logger,
         )
         return 1
+
+    cot = resultado.cotizaciones
+    if resultado.fuentes_fallback:
+        # Aviso informativo, no bloqueante: la carga sigue su curso normal
+        # con el valor de respaldo. Sin este aviso, un fallback silencioso
+        # escondería para siempre que dolarhoy.com necesita un arreglo.
+        _alertar(
+            cfg,
+            "[Tourplan FX Bot] Se usó fuente de respaldo - revisar parser de dolarhoy.com",
+            (
+                f"El {hoy}, dolarhoy.com no se pudo parsear para: "
+                f"{', '.join(resultado.fuentes_fallback)}. Se usó dolarapi.com como "
+                f"respaldo y la carga en Tourplan continuó con normalidad.\n\n"
+                f"Revisar el scraper: probablemente dolarhoy.com cambió de formato "
+                f"de nuevo (ver CLAUDE.md, sección 'Puntos delicados')."
+            ),
+            logger,
+        )
 
     try:
         validar_y_registrar(cot, umbral_pct=cfg["umbral_variacion_pct"])
@@ -162,6 +186,9 @@ def main() -> int:
         "=== Proceso completado OK (%s) -> MEP=%s | Oficial=%s | Emisivo=%s ===",
         hoy, cot.dolar_mep, cot.dolar_oficial, cot.dolar_emisivo,
     )
+    # Heartbeat solo en el camino 100% exitoso - es justo esa ausencia lo que
+    # el servicio externo debe detectar si el bot no corre un día.
+    enviar_heartbeat(cfg["heartbeat_url"])
     return 0
 
 

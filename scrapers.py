@@ -18,6 +18,12 @@ Estrategia de parseo: en vez de depender de nombres de clases CSS (que un
 rediseño del sitio puede cambiar de un día para otro), se busca sobre el
 TEXTO VISIBLE de la página los rótulos "Compra"/"Venta" cerca del nombre de
 cada cotización. Es más robusto ante cambios de maquetación.
+
+Si aun así dolarhoy.com no se puede parsear (rediseño no contemplado, corte
+del sitio), `obtener_cotizaciones()` usa dolarapi.com como respaldo
+automático (JSON simple, sin HTML que romper) - ver `_obtener_con_fallback`.
+Si dolarhoy.com y dolarapi.com fallan las dos, recién ahí se corta la carga
+del día con `ScrapingError`, igual que antes de tener este respaldo.
 """
 from __future__ import annotations
 
@@ -52,6 +58,18 @@ class Cotizaciones:
     dolar_mep: float
     dolar_oficial: float
     dolar_emisivo: float
+
+
+@dataclass
+class ResultadoScraping:
+    """Envuelve `Cotizaciones` con qué fuentes tuvieron que usar el fallback
+    de dolarapi.com. NO se agrega ese dato a `Cotizaciones` a propósito: ese
+    dataclass se persiste tal cual (vía `asdict`) en el historial que usa
+    `validacion.py` para comparar día a día, y un campo extra ahí se colaría
+    en esa comparación."""
+
+    cotizaciones: Cotizaciones
+    fuentes_fallback: list[str]
 
 
 def _parse_ar_number(raw: str) -> float:
@@ -158,17 +176,80 @@ def get_dolar_oficial(html: str | None = None) -> float:
     )
 
 
-def obtener_cotizaciones() -> Cotizaciones:
-    """Punto de entrada principal: devuelve los 3 valores listos para cargar."""
-    mep = get_dolar_mep()
-    oficial = get_dolar_oficial()
+DOLARAPI_URL_TEMPLATE = "https://dolarapi.com/v1/dolares/{casa}"
+
+
+def _fallback_dolarapi(casa: str, respuesta: dict | None = None) -> float:
+    """Fallback cuando dolarhoy.com no se puede parsear: dolarapi.com expone
+    el mismo dato como JSON simple y numérico, sin HTML que romper con un
+    rediseño. `casa` es "oficial" o "bolsa" (bolsa = equivalente de MEP en
+    dolarapi.com). Un solo intento, sin los reintentos de `_fetch` - si esto
+    también falla, se corta la carga del día igual que si solo existiera
+    dolarhoy.com.
+
+    Acepta `respuesta` ya obtenida (mismo patrón que el parámetro `html` de
+    get_dolar_mep/get_dolar_oficial) para poder testear sin red.
+    """
+    if respuesta is None:
+        url = DOLARAPI_URL_TEMPLATE.format(casa=casa)
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+            resp.raise_for_status()
+            respuesta = resp.json()
+        except (requests.exceptions.RequestException, ValueError) as exc:
+            raise ScrapingError(f"No se pudo obtener el fallback de {url}: {exc}") from exc
+
+    try:
+        return float(respuesta["venta"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ScrapingError(
+            f"Respuesta inesperada de dolarapi.com para '{casa}': {respuesta}"
+        ) from exc
+
+
+def _obtener_con_fallback(obtener_de_dolarhoy, casa_dolarapi: str) -> tuple[float, bool]:
+    """Intenta la fuente primaria (dolarhoy.com); si falla, prueba
+    dolarapi.com. Devuelve (valor, se_uso_fallback). Si fallan las dos,
+    relanza un ScrapingError combinado - se sigue cortando la carga del día
+    sin tocar Tourplan, como hoy."""
+    try:
+        return obtener_de_dolarhoy(), False
+    except ScrapingError as exc_dolarhoy:
+        logger.warning(
+            "Falló dolarhoy.com (%s); probando dolarapi.com como respaldo...",
+            exc_dolarhoy,
+        )
+        try:
+            return _fallback_dolarapi(casa_dolarapi), True
+        except ScrapingError as exc_fallback:
+            raise ScrapingError(
+                f"Fallaron ambas fuentes. dolarhoy.com: {exc_dolarhoy} | "
+                f"dolarapi.com: {exc_fallback}"
+            ) from exc_fallback
+
+
+def obtener_cotizaciones() -> ResultadoScraping:
+    """Punto de entrada principal: devuelve los 3 valores listos para cargar,
+    con dolarapi.com como respaldo automático si dolarhoy.com no se puede
+    parsear (ver `_obtener_con_fallback`)."""
+    mep, fallback_mep = _obtener_con_fallback(get_dolar_mep, "bolsa")
+    oficial, fallback_oficial = _obtener_con_fallback(get_dolar_oficial, "oficial")
     emisivo = round(oficial + 10, 2)
+
+    fuentes_fallback = [
+        nombre
+        for nombre, usado in (("mep", fallback_mep), ("oficial", fallback_oficial))
+        if usado
+    ]
+    if fuentes_fallback:
+        logger.warning("Se usó dolarapi.com como respaldo para: %s", fuentes_fallback)
 
     logger.info(
         "Cotizaciones obtenidas -> MEP: %s | Oficial: %s | Emisivo: %s",
         mep, oficial, emisivo,
     )
-    return Cotizaciones(dolar_mep=mep, dolar_oficial=oficial, dolar_emisivo=emisivo)
+    cot = Cotizaciones(dolar_mep=mep, dolar_oficial=oficial, dolar_emisivo=emisivo)
+    return ResultadoScraping(cotizaciones=cot, fuentes_fallback=fuentes_fallback)
 
 
 if __name__ == "__main__":

@@ -250,7 +250,18 @@ def _click_item_menu(page: Page, texto: str) -> None:
     # Los ítems del sidebar son <label> dentro de .menu-heading; un
     # <div class="click-area"> superpuesto intercepta el click normal, por
     # eso hace falta force=True (verificado contra la instancia real).
-    page.get_by_text(re.compile(rf"^{re.escape(texto)}$", re.IGNORECASE)).first.click(force=True)
+    #
+    # force=True salta TODO el auto-wait de actionability de Playwright, no
+    # solo el de "recibe eventos" - incluye el de "visible". Si el sidebar
+    # todavía está en plena animación de apertura (típicamente justo después
+    # de un login fresco, cuando no hay sesión guardada para reutilizar), el
+    # click fallaba al toque con "Element is not visible" en vez de esperar
+    # a que termine (detectado el 2026-09-28: falló una vez tras un login
+    # fresco, anduvo bien al reintentar con la sesión ya guardada). Por eso
+    # se espera visibilidad explícitamente ANTES del click forzado.
+    item = page.get_by_text(re.compile(rf"^{re.escape(texto)}$", re.IGNORECASE)).first
+    item.wait_for(state="visible")
+    item.click(force=True)
 
 
 def _navegar_a_exchange_rates(context, page: Page) -> Page:
