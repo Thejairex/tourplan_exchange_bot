@@ -16,6 +16,16 @@ página real para el mismo "Dólar MEP":
 Se agregó además el mismo patrón para "Dólar Oficial" (link de navegación
 sin Compra/Venta cerca + tarjeta real de cotización), verificado contra la
 página real el 2026-07-20.
+
+Actualizado el 2026-09-28 con dos cambios reales del sitio que rompieron el
+scraping de MEP en producción:
+
+4. La tarjeta de "Dólar MEP" ahora tiene una etiqueta "Conseguilo en: <link
+   de broker>" entre el nombre y "Compra" (las cotizaciones que se consiguen
+   vía broker - MEP, CCL, Dólar Digital - la muestran; Oficial no).
+5. La tarjeta de "Dólar Oficial" pasó a mostrarse SIN decimales y con punto
+   de miles ("$1.550" en vez de "$1500,00"), lo que rompía _parse_ar_number
+   (sin coma, interpretaba el punto como decimal: 1.55 en vez de 1550).
 -->
 <html lang="es">
 <body>
@@ -27,6 +37,7 @@ página real el 2026-07-20.
     <div class="title">
       <a class="titleText" href="https://bullmarket.com.ar/">Dólar MEP </a>
     </div>
+    <div class="broker">Conseguilo en:</div>
     <div class="values">
       <div class="compra">
         <div class="label">Compra</div>
@@ -54,13 +65,13 @@ página real el 2026-07-20.
     <div class="values">
       <div class="compra">
         <div class="label">Compra</div>
-        <div class="val" style="color:#2ecc71">$1450,00</div>
+        <div class="val" style="color:#2ecc71">$1.500</div>
       </div>
       <div class="separator" style="background:#2ecc71"></div>
       <div class="venta">
         <div class="venta-wrapper">
           <div class="label">Venta</div>
-          <div class="val" style="color:#2ecc71">$1500,00</div>
+          <div class="val" style="color:#2ecc71">$1.550</div>
         </div>
         <div class="var-porcentaje">0.00%</div>
       </div>
@@ -83,8 +94,8 @@ página real el 2026-07-20.
     <div class="tile is-child">
       <a href="/cotizaciondolaroficial">
         <div class="title">Dólar Oficial</div>
-        <div class="compra">1450,00</div>
-        <div class="venta">1500,00</div>
+        <div class="compra">1.500</div>
+        <div class="venta">1.550</div>
       </a>
     </div>
   </div>

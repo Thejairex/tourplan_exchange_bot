@@ -160,6 +160,23 @@ screenshot).
   visible* (rótulos "Compra"/"Venta", nombre de la cotización) con regex, en
   vez de depender de clases CSS. Al modificarlos, mantener esa estrategia y el
   formato de número argentino que maneja `_parse_ar_number` ("1.527,80").
+  Dos rediseños de dolarhoy.com ya rompieron el parseo en producción (ambos
+  detectados el 2026-09-28, corriendo `python scrapers.py` a mano tras un
+  aviso de `ScrapingError` en el log):
+  - **Etiqueta "Conseguilo en:" entre el nombre y "Compra"**: las
+    cotizaciones que se consiguen vía broker (MEP, CCL, Dólar Digital)
+    agregaron ese texto de por medio, y el margen de tolerancia antes de
+    "Compra" en el regex (`\D{0,15}?`) no lo cubría — se subió a `\D{0,40}?`
+    en `get_dolar_mep`/`get_dolar_oficial`. Oficial no tiene esa etiqueta
+    (no se consigue vía broker), pero se subió el margen igual ahí por si
+    se agrega a futuro.
+  - **Números sin coma y con punto de miles** (ej. Oficial mostrado como
+    `"$1.550"` en vez de `"$1500,00"`): `_parse_ar_number` asumía que, sin
+    coma, el punto era decimal (una herencia de cuando se scrapeaba BNA, que
+    sí mostraba decimales así — ver el punto de abajo). Devolvía `1.55` en
+    vez de `1550`. Ahora distingue por cantidad de dígitos después del
+    punto: exactamente 3 dígitos = separador de miles (se elimina), otra
+    cantidad = punto decimal real (se deja).
 - **Dólar Oficial pasó de scrapear el BNA a dolarhoy.com**: bna.com.ar era
   intermitente (bloqueaba con WAF, o cerraba la conexión sin responder y se
   recuperaba sola a los pocos segundos, sin un patrón claro de causa). Se

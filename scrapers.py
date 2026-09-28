@@ -60,11 +60,20 @@ def _parse_ar_number(raw: str) -> float:
     Ejemplos:
         "1.527,80" -> 1527.80   (formato argentino, coma decimal)
         "1527,80"  -> 1527.80
+        "1.550"    -> 1550.0    (dolarhoy sin decimales: el punto es de miles)
         "1492.0000" -> 1492.0   (algunas tablas del BNA usan punto decimal)
+
+    Sin coma, un punto es ambiguo (miles vs. decimal) - se distingue por la
+    cantidad de dígitos que deja atrás: un punto de miles siempre agrupa de a
+    3 dígitos exactos (detectado el 2026-09-28: dolarhoy pasó a mostrar el
+    Oficial como "$1.550" sin coma, y esta función lo interpretaba como
+    1.55); un punto decimal heredado de BNA no deja justo 3 (ej. "0000").
     """
     raw = raw.strip()
     if "," in raw:
         raw = raw.replace(".", "").replace(",", ".")
+    elif re.fullmatch(r"\d{1,3}(\.\d{3})+", raw):
+        raw = raw.replace(".", "")
     return float(raw)
 
 
@@ -105,8 +114,14 @@ def get_dolar_mep(html: str | None = None) -> float:
     # Compra+Venta se busca anclado al principio de la ventana (re.match, no
     # re.search) para que, si el par inmediato no matchea, NO se salte al
     # bloque de la SIGUIENTE cotización que sí tenga el formato esperado.
+    #
+    # El primer \D admite hasta 40 caracteres (no solo 15) porque las
+    # cotizaciones que se consiguen vía broker (MEP, CCL, Dólar Digital)
+    # muestran una etiqueta "Conseguilo en:" entre el nombre y "Compra"
+    # (detectado el 2026-09-28: dolarhoy agregó esa etiqueta y rompió el
+    # parseo de MEP, que antes tenía "Compra" pegado al nombre).
     number = r"[\d\.]+(?:,\d{2})?"
-    par = rf"\D{{0,15}}?Compra\D{{0,20}}?{number}\D{{0,20}}?Venta\D{{0,15}}?({number})"
+    par = rf"\D{{0,40}}?Compra\D{{0,20}}?{number}\D{{0,20}}?Venta\D{{0,15}}?({number})"
     for m in re.finditer(r"D[oó]lar\s*MEP", text, re.IGNORECASE):
         window = text[m.end(): m.end() + 300]
         # Evita confundir con "Dólar MEP Cripto" u otras variantes largas
@@ -126,8 +141,11 @@ def get_dolar_oficial(html: str | None = None) -> float:
     soup = BeautifulSoup(html, "html.parser")
     text = re.sub(r"\s+", " ", soup.get_text(separator=" | "))
 
+    # Mismo margen de 40 caracteres que get_dolar_mep antes de "Compra" (ver
+    # comentario ahí) - hoy el Oficial no tiene la etiqueta "Conseguilo en:"
+    # de por medio, pero conviene tolerarla igual por si dolarhoy la agrega acá también.
     number = r"[\d\.]+(?:,\d{2})?"
-    par = rf"\D{{0,15}}?Compra\D{{0,20}}?{number}\D{{0,20}}?Venta\D{{0,15}}?({number})"
+    par = rf"\D{{0,40}}?Compra\D{{0,20}}?{number}\D{{0,20}}?Venta\D{{0,15}}?({number})"
     for m in re.finditer(r"D[oó]lar\s*Oficial", text, re.IGNORECASE):
         window = text[m.end(): m.end() + 300]
         venta_m = re.match(par, window)

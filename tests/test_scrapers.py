@@ -32,6 +32,9 @@ def _leer_fixture(nombre: str) -> str:
         ("1527,80", 1527.80),
         ("1492.0000", 1492.0),
         ("1460,00", 1460.0),
+        ("1.550", 1550.0),
+        ("1.500", 1500.0),
+        ("12.345.678", 12345678.0),
     ],
 )
 def test_parse_ar_number(raw: str, esperado: float) -> None:
@@ -50,7 +53,7 @@ def test_get_dolar_mep_sin_match_lanza_scraping_error() -> None:
 
 def test_get_dolar_oficial_devuelve_valor_venta() -> None:
     html = _leer_fixture("dolarhoy.html")
-    assert get_dolar_oficial(html) == 1500.00
+    assert get_dolar_oficial(html) == 1550.00
 
 
 def test_get_dolar_oficial_sin_match_lanza_scraping_error() -> None:
